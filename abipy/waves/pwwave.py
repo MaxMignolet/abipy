@@ -315,6 +315,33 @@ class PWWaveFunction(WaveFunction):
     #    newmesh = Mesh3D(fft_ndivs, rprimd, pbc=True)
     #    self.mesh = newmesh
 
+    def pww_rtrans_inplace(self, rvector):
+        """
+        Translates the wavefunction by a vector rvector. This is to be used
+        for translation of wavefunctions in supercells.
+        Args:
+            rvector: translation vector in reduced coordinates
+        Note:
+            This function transforms the wave u_k(r) = sum_G u_k(G) e^ikr e^iGr
+            as T(rvec) u_k(r) = e^ikrvec sum_G sum_G u_k(G) e^iGrvec. It
+            tanslates the wavefunction as a whole and not only the periodic
+            part even though only the periodic part is modified."""
+        kvec = self.kpoint.frac_coords
+        for iGvec, Gvec in enumerate(self.gsphere):
+            self._ug[:,iGvec] = self._ug[:,iGvec] \
+                                * np.exp(1j*2*np.pi*np.dot(Gvec, rvector))
+        self._ug = self._ug * np.exp(1j*2*np.pi*np.dot(kvec, rvector))
+
+    def pww_rtrans(self, rvector) -> PWWaveFunction:
+        """
+        Same as pww_rtrans_inplace but perform the translation on a copy
+        """
+        pww_copy = PWWaveFunction(self.structure, self.nspinor, self.spin,
+                                  self.band, self.gsphere.copy(), self.ug.copy())
+        # pww_copy.set_mesh(self._mesh.copy())
+        pww_copy.pww_rtrans_inplace(rvector)
+        return pww_copy
+
     #def pwwtows_inplace(self):
     #    """Wrap the kpoint to the interval ]-1/2,1/2] and update pwwave accordingly."""
     #    kpoint = Kpoint(self.gsphere.kpoint, self.gsphere.gprimd)
