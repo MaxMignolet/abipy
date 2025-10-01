@@ -157,7 +157,7 @@ def data_from_cplx_mode(cplx_mode: str, arr, tol=None):
     return val if tol is None else np.where(np.abs(val) > tol, val, 0)
 
 
-def is_diagonal(matrix, atol=1e-12):
+def is_diagonal(matrix, atol=1e-12) -> bool:
     """
     Return True if matrix is diagonal.
     """
@@ -304,7 +304,7 @@ def smooth(x, window_len=11, window='hanning'):
     This method is based on the convolution of a scaled window with the signal.
     The signal is prepared by introducing reflected copies of the signal
     (with the window size) in both ends so that transient parts are minimized
-    in the begining and end part of the output signal.
+    in the beginning and end part of the output signal.
     Taken from http://www.scipy.org/Cookbook/SignalSmooth
 
     Args:
@@ -315,7 +315,7 @@ def smooth(x, window_len=11, window='hanning'):
 
     Returns: the smoothed signal.
 
-    example::
+    .. code-block::
 
         t = linspace(-2,2,0.1)
         x = sin(t)+randn(len(t))*0.1
@@ -459,7 +459,7 @@ class BlochRegularGridInterpolator:
 
         # Build `ndat` interpolators. Note that RegularGridInterpolator supports
         # [nx, ny, nz, ...] arrays but then each call operates on the full set of
-        # ndat components and this complicates the declation of callbacks
+        # ndat components and this complicates the declaration of callbacks
         # operating on a single component.
         from scipy.interpolate import RegularGridInterpolator
         self._interpolators = [None] * self.ndat
@@ -640,6 +640,38 @@ class BzRegularGridInterpolator:
             values[idat] = self._interpolators[idat](uc_coords, **kwargs)
 
         return values
+
+    def plot_ax(self, ax=None, **kwargs) -> Figure:
+        """
+        Plot interpolated results along a high-symmetry path.
+
+        Args:
+            ax: matplotlib :class:`Axes` or None if a new figure should be created.
+        """
+        # Get high-symmetry path from structure.
+        kpoints = self.structure.hsym_kpoints
+        nk = len(kpoints)
+        values = np.empty((nk, self.ndat))
+        ticks, labels = [], []
+
+        for ik, kpt in enumerate(kpoints):
+            values[ik] = self.eval_kpoint(kpt.frac_coords, cartesian=False)
+            if kpt.name is not None:
+                ticks.append(ik)
+                labels.append(kpt.name)
+
+        # Plot values (import here to avoid cyclic dependencies)
+        from abipy.tools.plotting import get_ax_fig_plt
+        ax, fig, plt = get_ax_fig_plt(ax=ax, grid=True)
+        for idat in range(self.ndat):
+            #if idat != 5: continue
+            ax.plot(values[:,idat])
+
+        ax.set_xlabel("Wave Vector")
+        ax.set_xticks(ticks, minor=False)
+        ax.set_xticklabels(labels, fontdict=None, minor=False, size=kwargs.pop("klabel_size", "large"))
+
+        return fig
 
 
 #class PolyExtrapolator:

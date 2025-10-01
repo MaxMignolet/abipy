@@ -1,8 +1,6 @@
 """
 This module contains objects for postprocessing e-ph calculations
 using the results stored in the GSTORE.nc file.
-
-For a theoretical introduction see :cite:`Giustino2017`
 """
 from __future__ import annotations
 
@@ -11,8 +9,8 @@ import numpy as np
 import pandas as pd
 #import abipy.core.abinit_units as abu
 
+from functools import cached_property
 from monty.string import marquee #, list_strings
-from monty.functools import lazy_property
 from monty.termcolor import cprint
 from abipy.core.structure import Structure
 from abipy.core.kpoints import kpoints_indices
@@ -55,6 +53,7 @@ class GstoreFile(AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands):
 
     .. code-block:: python
 
+        from abipy.eph.gstore import GstoreFile
         with GstoreFile("out_GSTORE.nc") as gstore:
             print(gstore)
 
@@ -79,7 +78,7 @@ class GstoreFile(AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands):
         super().__init__(filepath)
         self.r = GstoreReader(filepath)
 
-    @lazy_property
+    @cached_property
     def ebands(self) -> ElectronBands:
         """|ElectronBands| object."""
         return self.r.read_ebands()
@@ -93,11 +92,11 @@ class GstoreFile(AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands):
         """Close the file."""
         self.r.close()
 
-    @lazy_property
+    @cached_property
     def gqk_spin(self) -> list:
         return [Gqk.from_gstore(self, spin) for spin in range(self.nsppol)]
 
-    @lazy_property
+    @cached_property
     def params(self) -> dict:
         """dict with the convergence parameters, e.g. ``nbsum``."""
         #od = OrderedDict([
@@ -194,7 +193,7 @@ class Gqk:
     @classmethod
     def from_gstore(cls, gstore: GstoreFile, spin: int) -> Gqk:
         """
-        Build an istance from a GstoreFile and the spin index.
+        Build an instance from a GstoreFile and the spin index.
         """
         ncr = gstore.r
         path = f"gqk_spin{spin+1}"
@@ -348,7 +347,7 @@ class Gqk:
         """
         Helper function to compare two GQK objects.
         """
-        # This dimensions must agree in order to have a meaningfull comparison.
+        # This dimensions must agree in order to have a meaningful comparison.
         # so raise immediately if not equal.
         aname_list = ["cplex", "spin", "nb", "glob_nk", "glob_nq"]
 
@@ -476,7 +475,7 @@ class GstoreReader(BaseEphReader):
                 #print(f"Found {qpoint = } with index {iq_g = }")
                 return iq_g, qpoint
 
-        raise ValueError(f"Cannot find {qpoint=} in GSTORE.nc")
+        raise ValueError(f"Cannot find {qpoint=} in {self.filepath=}")
 
     def find_ik_glob_kpoint(self, kpoint, spin: int):
         """Find the internal indices of the kpoint needed to access the gvals array."""
@@ -486,10 +485,10 @@ class GstoreReader(BaseEphReader):
                 #print(f"Found {kpoint = } with index {ik_g = }")
                 return ik_g, kpoint
 
-        raise ValueError(f"Cannot find {kpoint=} in GSTORE.nc")
+        raise ValueError(f"Cannot find {kpoint=} in {self.filepath=}")
 
     # TODO: This fix to read groups should be imported in pymatgen.
-    @lazy_property
+    @cached_property
     def path2group(self) -> dict:
         return self.rootgrp.groups
 
@@ -543,7 +542,7 @@ class GstoreRobot(Robot, RobotWithEbands):
         """
         Helper function to compare two GSTORE files.
         """
-        # These quantities must be the same to have a meaningfull comparison.
+        # These quantities must be the same to have a meaningful comparison.
         aname_list = ["structure", "nsppol", "cplex", "nkbz", "nkibz",
                       "nqbz", "nqibz", "completed", "kzone", "qzone", "kfilter", "gmode",
                       "brange_spin", "erange_spin", "glob_spin_nq", "glob_nk_spin",

@@ -5,13 +5,13 @@ Inspired to the Fortran version of wannier90.
 """
 from __future__ import annotations
 
+import time
 import numpy as np
 import pandas as pd
-import time
 
 from tabulate import tabulate
+from functools import cached_property
 from monty.string import marquee
-from monty.functools import lazy_property
 from monty.termcolor import cprint
 from abipy.core.structure import Structure
 from abipy.core.mixins import AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands, NotebookWriter
@@ -50,12 +50,12 @@ class AbiwanFile(AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands, Not
         # Number of bands actually used to construct the Wannier functions
         self.num_bands_spin = self.r.read_value("num_bands")
 
-    @lazy_property
+    @cached_property
     def nwan_spin(self) -> np.ndarray:
         """Number of Wannier functions for each spin."""
         return self.r.read_value("nwan")
 
-    @lazy_property
+    @cached_property
     def mwan(self) -> int:
         """
         Max number of Wannier functions over spins, i.e max(nwan_spin)
@@ -63,12 +63,12 @@ class AbiwanFile(AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands, Not
         """
         return self.r.read_dimvalue("mwan")
 
-    @lazy_property
+    @cached_property
     def nntot(self) -> int:
         """Number of k-point neighbours."""
         return int(self.r.read_value("nntot"))
 
-    @lazy_property
+    @cached_property
     def bands_in(self) -> np.ndarray:
         """
         [nsppol, mband] logical array. Set to True if (spin, band) is included
@@ -76,7 +76,7 @@ class AbiwanFile(AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands, Not
         """
         return self.r.read_value("band_in_int").astype(bool)
 
-    @lazy_property
+    @cached_property
     def lwindow(self) -> np.ndarray:
         """
         [nsppol, nkpt, max_num_bands] array. Only if disentanglement.
@@ -84,31 +84,31 @@ class AbiwanFile(AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands, Not
         """
         return self.r.read_value("lwindow_int").astype(bool)
 
-    #@lazy_property
+    #@cached_property
     #def ndimwin(self):
     #    """
     #    [nsppol, nkpt] array giving the number of bands inside the outer window for each k-point and spin.
     #    """
     #    return self.r.read_value("ndimwin")
 
-    @lazy_property
+    @cached_property
     def have_disentangled_spin(self) -> np.ndarray:
         """[nsppol] bool array. Whether disentanglement has been performed."""
         #return self.r.read_value("have_disentangled_spin").astype(bool)
         # TODO: Exclude bands
         return self.nwan_spin != self.num_bands_spin
 
-    @lazy_property
+    @cached_property
     def wann_centers(self) -> np.ndarray:
         """[nsppol, mwan, 3] array with Wannier centers in Ang."""
         return self.r.read_value("wann_centres")
 
-    @lazy_property
+    @cached_property
     def wann_spreads(self) -> np.ndarray:
         """[nsppol, mwan] array with spreads in Ang^2"""
         return self.r.read_value("wann_spreads")
 
-    @lazy_property
+    @cached_property
     def irvec(self) -> np.ndarray:
         """
         [nrpts, 3] array with the lattice vectors in the Wigner-Seitz cell
@@ -116,7 +116,7 @@ class AbiwanFile(AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands, Not
         """
         return self.r.read_value("irvec")
 
-    @lazy_property
+    @cached_property
     def ndegen(self) -> np.ndarray:
         """
         [nrpts] array with the degeneracy of each point.
@@ -124,7 +124,7 @@ class AbiwanFile(AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands, Not
         """
         return self.r.read_value("ndegen")
 
-    @lazy_property
+    @cached_property
     def params(self) -> dict:
         """dict with parameters that might be subject to convergence studies."""
         od = self.get_ebands_params()
@@ -194,7 +194,7 @@ class AbiwanFile(AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands, Not
         """Close file."""
         self.r.close()
 
-    @lazy_property
+    @cached_property
     def ebands(self) -> ElectronBands:
         """|ElectronBands| object."""
         return self.r.read_ebands()
@@ -204,7 +204,7 @@ class AbiwanFile(AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands, Not
         """|Structure| object."""
         return self.ebands.structure
 
-    @lazy_property
+    @cached_property
     def hwan(self) -> HWanR:
         """
         Construct the matrix elements of the KS Hamiltonian in real space
@@ -346,7 +346,7 @@ class AbiwanFile(AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands, Not
     def plot_with_ebands(self, ebands_kpath,
                          ebands_kmesh=None, method="gaussian", step: float = 0.05, width: float = 0.1, **kwargs) -> Figure:
         """
-        Receive an ab-initio electronic strucuture, interpolate the energies on the same list of k-points
+        Receive an ab-initio electronic structure, interpolate the energies on the same list of k-points
         and compare the two band structures.
 
         Args:
@@ -402,7 +402,7 @@ class AbiwanFile(AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands, Not
 
     def write_notebook(self, nbpath=None) -> str:
         """
-        Write a jupyter_ notebook to ``nbpath``. If nbpath is None, a temporay file in the current
+        Write a jupyter_ notebook to ``nbpath``. If nbpath is None, a temporary file in the current
         working directory is created. Return path to the notebook.
         """
         nbformat, nbv, nb = self.get_nbformat_nbv_nb(title=None)
@@ -458,7 +458,7 @@ class HWanR(ElectronInterpolator):
         Args:
             spin: Spin index.
             kpt: K-point in reduced coordinates.
-            der1: If not None, ouput gradient is stored in der1[nband, 3].
+            der1: If not None, output gradient is stored in der1[nband, 3].
             der2: If not None, output Hessian is der2[nband, 3, 3].
 
         Return:
@@ -655,7 +655,7 @@ class AbiwanRobot(Robot, RobotWithEbands):
 
     def write_notebook(self, nbpath=None) -> str:
         """
-        Write a jupyter_ notebook to ``nbpath``. If nbpath is None, a temporay file in the current
+        Write a jupyter_ notebook to ``nbpath``. If nbpath is None, a temporary file in the current
         working directory is created. Return path to the notebook.
         """
         nbformat, nbv, nb = self.get_nbformat_nbv_nb(title=None)

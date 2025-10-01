@@ -6,7 +6,7 @@ import os
 import tempfile
 import numpy as np
 
-from monty.functools import lazy_property
+from functools import cached_property
 from monty.string import marquee
 from abipy.tools.numtools import is_diagonal
 from abipy.core.mixins import AbinitNcFile, Has_Structure
@@ -17,7 +17,7 @@ from abipy.flowtk.wrappers import Abitk
 
 class KmeshFile(AbinitNcFile, Has_Structure):
     """
-    Interface to the KMESH.nc file produced by abitk
+    Interface to the KMESH.nc file produced by abitk.
 
     .. rubric:: Inheritance Diagram
     .. inheritance-diagram:: KmeshFile
@@ -90,12 +90,12 @@ class KmeshFile(AbinitNcFile, Has_Structure):
         ngkpt = None if not is_diagonal(self.kptrlatt) else np.diag(self.kptrlatt)
         return ngkpt, self.shiftk
 
-    @lazy_property
+    @cached_property
     def structure(self) -> Structure:
         """|Structure| object."""
         return self.r.read_structure()
 
-    @lazy_property
+    @cached_property
     def params(self) -> dict:
         return {}
 

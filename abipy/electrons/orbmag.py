@@ -6,7 +6,7 @@ import numpy as np
 
 from numpy.linalg import inv, det, eig, eigvals, norm
 #from monty.termcolor import cprint
-from monty.functools import lazy_property
+from functools import cached_property
 from monty.string import list_strings, marquee
 from abipy.core.mixins import AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands, NotebookWriter
 from abipy.core.structure import Structure
@@ -17,6 +17,7 @@ from abipy.core.kpoints import kpoints_indices, kmesh_from_mpdivs, map_grid2ibz
 from abipy.tools.typing import Figure
 from abipy.tools.plotting import set_axlims, get_ax_fig_plt, get_axarray_fig_plt, add_fig_kwargs, Marker
 
+import matplotlib.patches as mpatches
 
 def filter_sigma(sigma, atol):
     """from raw sigma_ij output, convert to ppm shielding and remove small parts"""
@@ -136,7 +137,7 @@ class OrbmagAnalyzer:
                             if iterm < 4:
                                 omtmp = ucvol * np.matmul(gprimd, orbmag_mesh[iterm,0:ndir,isppol,ikpt,iband])
                             else:
-                                omtmp = np.matmul(rprimd, orbmag_mesh[iterm,0:ndir,isppol,ikpt,iband])
+                                omtmp = np.matmul(np.transpose(rprimd), orbmag_mesh[iterm,0:ndir,isppol,ikpt,iband])
 
                             self.orbmag_merge_mesh[iterm,idir,0:ndir,isppol,ikpt,iband] = omtmp
 
@@ -180,12 +181,12 @@ class OrbmagAnalyzer:
         for orb in self.orb_files:
             orb.close()
 
-    @lazy_property
+    @cached_property
     def natom(self)  -> int:
         """Number of atoms in the unit cell."""
         return len(self.structure)
 
-    @lazy_property
+    @cached_property
     def structure(self) -> Structure:
         """Structure object."""
         # Perform consistency check
@@ -194,7 +195,7 @@ class OrbmagAnalyzer:
             raise RuntimeError("ORBMAG.nc files have different structures")
         return structure
 
-    @lazy_property
+    @cached_property
     def has_nucdipmom(self) -> np.ndarray:
         """
         """
@@ -211,7 +212,7 @@ class OrbmagAnalyzer:
 
         return has_nucdipmom.astype(bool)
 
-    #@lazy_property
+    #@cached_property
     #def has_timrev(self) -> bool:
     #    """True if time-reversal symmetry is used in the BZ sampling."""
     #    has_timrev = self.orb_files[0].ebands.has_timrev
@@ -274,7 +275,7 @@ class OrbmagAnalyzer:
                     print('\n')
                 print('\n')
 
-    @lazy_property
+    @cached_property
     def ngkpt_and_shifts(self) -> tuple:
         """
         Return k-mesh divisions and shifts.
@@ -359,11 +360,11 @@ class OrbmagAnalyzer:
 
         return data, ngkpt, shifts
 
-    @lazy_property
+    @cached_property
     def has_full_bz(self) -> bool:
         """True if the list of k-points covers the full BZ."""
         ngkpt, shifts = self.ngkpt_and_shifts
-        return np.product(ngkpt) * len(shifts) == self.nkpt
+        return np.prod(ngkpt) * len(shifts) == self.nkpt
 
     def get_cif_string(self, symprec=None) -> str:
         """
@@ -588,21 +589,27 @@ _atom_site_aniso_U_12""".splitlines()
                 for ik, kpoint in enumerate(ebands_kpath.kpoints):
                     enes_n = ebands_kpath.eigens[spin, ik]
                     for e, value in zip(enes_n, interp_spin[spin].eval_kpoint(kpoint), strict=True):
-                        x.append(ik); y.append(e); s.append(scale * value)
+                        # note use of -value: the abinit calculation returns the induced magnetic moment,
+                        # but the plot should show shielding, which is -moment by convention
+                        # this mimics use of -1.0E6 in all the eigval reports below
+                        x.append(ik); y.append(e); s.append(scale * (-value))
                         ymin, ymax = min(ymin, e), max(ymax, e)
 
             # Compute colors based on sign (e.g., red for positive, blue for negative)
-            y = np.array(y)
-            c = np.where(y >= 0, "red", "blue")
+            c=["red" if value >= 0 else "blue" for value in s]
 
             points = Marker(x, y, s,
-                            c=c,
+                            c=c,marker='s',
                             #color=marker_color,edgecolors=marker_edgecolor,
                             alpha=marker_alpha, label=what)
 
             # Plot electron bands with markers.
             ebands_kpath.plot(ax=ax, points=points, show=False, linewidth=1.0)
             ax.legend(loc="best", shadow=True, fontsize=fontsize)
+
+            shielding_color=mpatches.Patch(color="red",label="Shielding")
+            deshielding_color=mpatches.Patch(color="blue",label="Deshielding")
+            ax.legend(handles=[shielding_color,deshielding_color])
 
         e0 = self.orb_files[0].ebands.fermie
         if ylims is None:
@@ -635,7 +642,7 @@ class OrbmagFile(AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands):
         super().__init__(filepath)
         self.r = ElectronsReader(filepath)
 
-    @lazy_property
+    @cached_property
     def ebands(self) -> ElectronBands:
         """|ElectronBands| object."""
         return self.r.read_ebands()
@@ -645,15 +652,15 @@ class OrbmagFile(AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands):
         """|Structure| object."""
         return self.ebands.structure
 
-    @lazy_property
+    @cached_property
     def target_atom(self) -> tuple:
         return self.target_atom_nucdipmom[0]
 
-    @lazy_property
+    @cached_property
     def nucdipmom_atom(self) -> tuple:
         return self.target_atom_nucdipmom[1]
 
-    @lazy_property
+    @cached_property
     def target_atom_nucdipmom(self) -> tuple:
         """
         Return the index of the atom with non-zero nuclear magnetic dipole moment and its values.
@@ -674,7 +681,7 @@ class OrbmagFile(AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands):
 
         return target_atom, nucdipmom[target_atom].copy()
 
-    @lazy_property
+    @cached_property
     def params(self) -> dict:
         """dict with parameters that might be subject to convergence studies."""
         od = self.get_ebands_params()

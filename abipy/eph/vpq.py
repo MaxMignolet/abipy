@@ -11,13 +11,13 @@ import numpy as np
 import pandas as pd
 import abipy.core.abinit_units as abu
 
+from functools import cached_property
 from monty.string import marquee
-from monty.functools import lazy_property
 from scipy.interpolate import interp1d
 #from monty.termcolor import cprint
 from abipy.core.func1d import Function1D
 from abipy.core.structure import Structure
-from abipy.core.kpoints import kpoints_indices, kmesh_from_mpdivs, map_grid2ibz
+from abipy.core.kpoints import kpoints_indices, kmesh_from_mpdivs #, map_grid2ibz
 from abipy.core.mixins import AbinitNcFile, Has_Structure, Has_ElectronBands, NotebookWriter
 from abipy.tools.typing import PathLike
 from abipy.tools.plotting import (add_fig_kwargs, get_axarray_fig_plt, set_axlims, set_visible,
@@ -137,7 +137,7 @@ class VpqFile(AbinitNcFile, Has_Structure, Has_ElectronBands, NotebookWriter):
         super().__init__(filepath)
         self.r = VpqReader(filepath)
 
-    @lazy_property
+    @cached_property
     def ebands(self) -> ElectronBands:
         """|ElectronBands| object."""
         return self.r.read_ebands()
@@ -151,12 +151,12 @@ class VpqFile(AbinitNcFile, Has_Structure, Has_ElectronBands, NotebookWriter):
         """Close the file."""
         self.r.close()
 
-    @lazy_property
+    @cached_property
     def polaron_spin(self) -> list[Polaron]:
         """List of Polaron objects, one for each spin (if any)."""
         return [Polaron.from_vpq(self, spin) for spin in range(self.r.nsppol)]
 
-    @lazy_property
+    @cached_property
     def params(self) -> dict:
         """dict with the convergence parameters, e.g. ``nbsum``."""
         r = self.r
@@ -169,11 +169,11 @@ class VpqFile(AbinitNcFile, Has_Structure, Has_ElectronBands, NotebookWriter):
         e_frohl = r.read_value("e_frohl") # in Ha
 
         d = dict(
-            avg_g = bool(avg_g),
-            e_frohl = e_frohl * abu.Ha_eV,
+            avg_g=bool(avg_g),
+            e_frohl=e_frohl * abu.Ha_eV,
             ngkpt=tuple(ngkpt),
-            inv_k = 1. / np.cbrt(nkbz),
-            invsc_linsize = 1. / np.cbrt(nkbz * self.structure.lattice.volume),
+            inv_k=1. / np.cbrt(nkbz),
+            invsc_linsize=1. / np.cbrt(nkbz * self.structure.lattice.volume),
         )
 
         return d
@@ -236,7 +236,7 @@ class VpqFile(AbinitNcFile, Has_Structure, Has_ElectronBands, NotebookWriter):
 class Polaron:
     """
     This object stores the polaron coefficients A_kn, B_qnu for a given spin and all the nstate polaron states.
-    Provides methods to plot |A_nk|^2 or |B_qnu|^2 together with the band structures (fatbands-like plots).
+    Provides methods to plot ``|A_nk|^2`` or ``|B_qnu|^2`` together with the band structures (fatbands-like plots).
     """
     spin: int          # Spin index.
     nstates: int       # Number of polaronic states for this spin.
@@ -245,7 +245,7 @@ class Polaron:
     nq: int            # Number of q-points in B_qnu (including filtering if any).
     bstart: int        # First band starts at bstart.
     bstop: int         # Last band (python convention)
-    erange: double     # Filtering value (in Ha)
+    erange: float     # Filtering value (in Ha)
     varpeq: VpqFile
 
     @classmethod
@@ -271,27 +271,27 @@ class Polaron:
         """Electron bands."""
         return self.varpeq.ebands
 
-    @lazy_property
+    @cached_property
     def kpoints(self) -> np.ndarray:
         """Reduced coordinates of the k-points."""
         return self.varpeq.r.read_value("kpts_spin")[self.spin, :self.nk]
 
-    @lazy_property
+    @cached_property
     def qpoints(self) -> np.ndarray:
         """Reduced coordinates of the q-points."""
         return self.varpeq.r.read_value("qpts_spin")[self.spin, :self.nq]
 
-    @lazy_property
+    @cached_property
     def a_kn(self) -> np.ndarray:
         """A_{pnk} coefficients for this spin."""
         return self.varpeq.r.read_value("a_spin", cmode="c")[self.spin, :self.nstates, :self.nk, :self.nb]
 
-    @lazy_property
+    @cached_property
     def b_qnu(self) -> np.ndarray:
         """B_{pqnu} coefficients for this spin."""
         return self.varpeq.r.read_value("b_spin", cmode="c")[self.spin, :self.nstates, :self.nq]
 
-    @lazy_property
+    @cached_property
     def scf_df_state(self) -> list[pd.DataFrame]:
         """
         List of dataframes with the SCF iterations. One dataframe for each polaron.
@@ -382,7 +382,7 @@ class Polaron:
 
         return "\n".join(lines)
 
-    @lazy_property
+    @cached_property
     def ngkpt_and_shifts(self) -> tuple:
         """
         Return k-mesh divisions and shifts.
@@ -456,7 +456,7 @@ class Polaron:
 
     def get_a2_interpolator_state(self, interp_method: str) -> BzRegularGridInterpolator:
         """
-        Build and return an interpolator for |A_nk|^2 for each polaronic state.
+        Build and return an interpolator for ``|A_nk|^2`` for each polaronic state.
 
         Args:
             interp_method: The method of interpolation. Supported are “linear”, “nearest”,
@@ -469,7 +469,7 @@ class Polaron:
 
     def get_b2_interpolator_state(self, interp_method: str) -> BzRegularGridInterpolator:
         """
-        Build and return an interpolator for |B_qnu|^2 for each polaronic state.
+        Build and return an interpolator for ``|B_qnu|^2`` for each polaronic state.
 
         Args:
             interp_method: The method of interpolation. Supported are “linear”, “nearest”,
@@ -549,14 +549,14 @@ class Polaron:
                             ax.set_yscale("log")
                     else:
                         if entry.name == "E_pol":
-                        # Solid line for the *variational* quantity, also put it on top
+                            # Solid line for the *variational* quantity, also put it on top
                             ls, zord = '-', 10
                         else:
-                        # Dashed lines for non-variational, put them below
+                            # Dashed lines for non-variational, put them below
                             ls, zord = '--', 0
 
                         if iax == 1:
-                            energy_like =True
+                            energy_like = True
                             # Plot values linear scale.
                             ax.plot(xs, ys, label=entry.latex, linestyle=ls, zorder=zord)
                         elif iax == 2:
@@ -586,7 +586,6 @@ class Polaron:
                     else:
                         ax.set_title("Log-scale difference")
 
-
         fig.suptitle(self.get_title(with_gaps=True))
         fig.tight_layout()
 
@@ -594,14 +593,14 @@ class Polaron:
 
     @add_fig_kwargs
     def plot_ank_with_ebands(self, ebands_kpath,
-                             ebands_kmesh=None, lpratio: int = 5, with_info = True, with_legend=True,
+                             ebands_kmesh=None, lpratio: int = 5, with_info=True, with_legend=True,
                              with_ibz_a2dos=True, method="gaussian", step="auto", width="auto",
                              nksmall: int = 20, normalize: bool = False, with_title=True, interp_method="linear",
                              ax_mat=None, ylims=None, scale=50, marker_color="gold", marker_edgecolor="gray",
                              marker_alpha=0.5, fontsize=12, lw_bands=1.0, lw_dos=1.0,
                              filter_value=None, fill_dos=True, **kwargs) -> Figure:
         """
-        Plot electron bands with markers whose size is proportional to |A_nk|^2.
+        Plot electron bands with markers whose size is proportional to ``|A_nk|^2``.
 
         Args:
             ebands_kpath: ElectronBands or netcdf file providing an electronic band structure along a k-path.
@@ -619,7 +618,7 @@ class Polaron:
             ax_mat: Matrix |matplotlib-Axes| or None if a new figure should be created.
             ylims: Set the data limits for the y-axis. Accept tuple e.g. ``(left, right)``
                    or scalar e.g. ``left``. If left (right) is None, default values are used.
-            scale: Scaling factor for |A_nk|^2.
+            scale: Scaling factor for ``|A_nk|^2``.
             marker_color: Color for markers and ADOS.
             marker_edgecolor: Color for marker edges.
             marker_edgecolor: Marker transparency.
@@ -838,7 +837,7 @@ class Polaron:
     def plot_bqnu_with_ddb(self, ddb, smearing_ev=0.001,
                            with_phdos=True, anaddb_kwargs=None, **kwargs) -> Figure:
         """
-        High-level interface to plot phonon energies with markers whose size is proportional to |B_qnu|^2.
+        High-level interface to plot phonon energies with markers whose size is proportional to ``|B_qnu|^2``.
         Similar to plot_bqnu_with_phbands but this function receives in input a DdbFile or a
         path to a DDB file and automates the computation of the phonon bands by invoking anaddb.
 
@@ -867,7 +866,7 @@ class Polaron:
                                marker_alpha=0.5, fontsize=12, lw_bands=1.0, lw_dos=1.0,
                                fill_dos=True, **kwargs) -> Figure:
         """
-        Plot phonon energies with markers whose size is proportional to |B_qnu|^2.
+        Plot phonon energies with markers whose size is proportional to ``|B_qnu|^2``.
 
         Args:
             phbands_qpath: PhononBands or nc file providing a phonon band structure.
@@ -880,7 +879,7 @@ class Polaron:
             with_title: True to add title with chemical formula and gaps.
             interp_method: Interpolation method.
             ax_mat: List of |matplotlib-Axes| or None if a new figure should be created.
-            scale: Scaling factor for |B_qnu|^2.
+            scale: Scaling factor for ``|B_qnu|^2``.
             marker_color: Color for markers.
             fontsize: fontsize for legends and titles.
         """
@@ -908,7 +907,7 @@ class Polaron:
 
             b2_max = b2_interp_state[pstate].get_max_abs_data()
             _scale = scale * 1. / b2_max
-    
+
             # handle LO-TO splitting
             prev_qpoint = None
             for iq, qpoint in enumerate(phbands_qpath.qpoints):
@@ -921,7 +920,6 @@ class Polaron:
                         nana_dir = phbands_qpath.qpoints[iq+1]._frac_coords
 
                     omegas_nu = phbands_qpath._get_non_anal_freqs(nana_dir)
-
 
                 for w, b2 in zip(omegas_nu, b2_interp_state[pstate].eval_kpoint(qpoint), strict=True):
                     w *= units_scale
@@ -1015,7 +1013,6 @@ class Polaron:
                                           label=r"$B^2$(E)", color=marker_color, linewidth=lw_dos,
                                           xfactor=units_scale, yfactor=1/units_scale)
             set_grid_legend(ax, fontsize, xlabel="Arb. unit")
-
 
             # Get mapping BZ --> IBZ needed to obtain the KS eigenvalues e_nk from the IBZ for the DOS
             # Compute B2(E) using only q-points in the IBZ. This is just for testing.
@@ -1281,7 +1278,6 @@ class VpqRobot(Robot, RobotWithEbands):
 
         return fig_list
 
-
     @add_fig_kwargs
     def plot_kconv(self, nfit: int = 3, spin: int = 0, pstate: int = 0, convby: str = "invsc_linsize",
                    add_lr: bool = False, **kwargs) -> list[Figure]:
@@ -1294,8 +1290,8 @@ class VpqRobot(Robot, RobotWithEbands):
             pstate (int, optional): Index of a polaronic state. Defaults to 0.
             convby (str, optional): Convergence parameter.
                 Possible values are:
-                    - `"invsc_linsize"`: Inverse linear size of a supercell (inverse Angstrom).
-                    - `"inv_k"`: Inverse linear size of a k-grid (arbitrary units).
+                - `"invsc_linsize"`: Inverse linear size of a supercell (inverse Angstrom).
+                - `"inv_k"`: Inverse linear size of a k-grid (arbitrary units).
                 Defaults to `"invsc_linsize"`.
             add_lr (bool, optional): Specifies if LR correction should be added a-posteriori.
                 Relevant when LR correction to the matrix elements is not used. Defaults to False.
