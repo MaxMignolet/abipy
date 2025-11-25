@@ -2863,6 +2863,8 @@ with the Abinit version you are using? Please contact the AbiPy developers.""" %
         )
 
         if ngkpt is not None: inp["ngkpt"] = ngkpt
+        if ngkpt is not None and "kptrlatt" in inp.keys():
+            del inp["kptrlatt"]
         if shiftk is not None:
             shiftk = np.reshape(shiftk, (-1, 3))
             inp.set_vars(shiftk=shiftk, nshiftk=len(shiftk))
@@ -2913,6 +2915,8 @@ with the Abinit version you are using? Please contact the AbiPy developers.""" %
         )
 
         if ngkpt is not None: inp["ngkpt"] = ngkpt
+        if ngkpt is not None and "kptrlatt" in inp.keys():
+            del inp["kptrlatt"]
         if shiftk is not None:
             shiftk = np.reshape(shiftk, (-1, 3))
             inp.set_vars(shiftk=shiftk, nshiftk=len(shiftk))
