@@ -2,28 +2,36 @@
 This module contains objects for postprocessing e-ph calculations
 using the results stored in the GSTORE.nc file.
 """
+
 from __future__ import annotations
 
 import dataclasses
+import itertools
+
+# import abipy.core.abinit_units as abu
+from functools import cached_property, lru_cache
+
 import numpy as np
 import pandas as pd
-#import abipy.core.abinit_units as abu
-
-from functools import cached_property
-from monty.string import marquee #, list_strings
+from monty.string import marquee  # , list_strings
 from monty.termcolor import cprint
-from abipy.core.structure import Structure
-from abipy.core.kpoints import kpoints_indices
-from abipy.core.mixins import AbinitNcFile, Has_Structure, Has_ElectronBands, Has_Header #, NotebookWriter
-from abipy.tools.typing import PathLike
-from abipy.tools.numtools import BzRegularGridInterpolator, nparr_to_df
-from abipy.tools.plotting import (add_fig_kwargs, get_ax_fig_plt, get_axarray_fig_plt, set_axlims, set_visible,
-    rotate_ticklabels, ax_append_title, set_ax_xylabels, linestyles)
-#from abipy.tools import duck
-from abipy.electrons.ebands import ElectronBands, RobotWithEbands
-#from abipy.tools.typing import Figure
+
 from abipy.abio.robots import Robot
+from abipy.core.kpoints import kpoints_indices
+from abipy.core.mixins import AbinitNcFile, Has_ElectronBands, Has_Header, Has_Structure  # , NotebookWriter
+from abipy.core.structure import Structure
+
+# from abipy.tools import duck
+from abipy.electrons.ebands import ElectronBands, RobotWithEbands
 from abipy.eph.common import BaseEphReader
+from abipy.tools.numtools import BzRegularGridInterpolator, nparr_to_df
+from abipy.tools.plotting import (
+    add_fig_kwargs,
+    get_ax_fig_plt,
+    get_axarray_fig_plt,
+    set_grid_legend,
+)
+from abipy.tools.typing import Figure, PathLike
 
 
 def _allclose(arr_name, array1, array2, verbose: int, rtol=1e-5, atol=1e-8) -> bool:
@@ -38,8 +46,8 @@ def _allclose(arr_name, array1, array2, verbose: int, rtol=1e-5, atol=1e-8) -> b
     if verbose:
         cprint(f"The arrays for {arr_name} are not almost equal within the tolerances {rtol=}, {atol=}", color="red")
 
-    #differing_indices = np.where(~np.isclose(array1, array2, atol=atol))
-    #for index in zip(*differing_indices):
+    # differing_indices = np.where(~np.isclose(array1, array2, atol=atol))
+    # for index in zip(*differing_indices):
     #    print(f"Difference at index {index}: array1 = {array1[index]}, array2 = {array2[index]}, difference = {abs(array1[index] - array2[index])}")
     return False
 
@@ -69,12 +77,17 @@ class GstoreFile(AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands):
     .. rubric:: Inheritance Diagram
     .. inheritance-diagram:: GstoreFile
     """
+
     @classmethod
     def from_file(cls, filepath: PathLike) -> GstoreFile:
         """Initialize the object from a netcdf file."""
         return cls(filepath)
 
     def __init__(self, filepath: PathLike):
+        """
+        Args:
+            filepath: Path to the netcdf file.
+        """
         super().__init__(filepath)
         self.r = GstoreReader(filepath)
 
@@ -94,20 +107,26 @@ class GstoreFile(AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands):
 
     @cached_property
     def gqk_spin(self) -> list:
+        """List of |Gqk| objects, one for each spin."""
         return [Gqk.from_gstore(self, spin) for spin in range(self.nsppol)]
 
     @cached_property
+    def has_gwpt(self) -> bool:
+        """True if GSTORE contains GWPT matrix elements."""
+        return self.r.gtype == "gwpt"
+
+    @cached_property
     def params(self) -> dict:
-        """dict with the convergence parameters, e.g. ``nbsum``."""
-        #od = OrderedDict([
+        """Dict with the convergence parameters, e.g. ``nbsum``."""
+        # od = OrderedDict([
         #    ("nbsum", self.nbsum),
         #    ("zcut", self.zcut),
         #    ("symsigma", self.symsigma),
         #    ("nqbz", self.r.nqbz),
         #    ("nqibz", self.r.nqibz),
-        #])
+        # ])
         ## Add EPH parameters.
-        #od.update(self.r.common_eph_params)
+        # od.update(self.r.common_eph_params)
 
         od = {}
         return od
@@ -117,7 +136,8 @@ class GstoreFile(AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands):
 
     def to_string(self, verbose: int = 0) -> str:
         """String representation with verbosiy level ``verbose``."""
-        lines = []; app = lines.append
+        lines = []
+        app = lines.append
 
         app(marquee("File Info", mark="="))
         app(self.filestat(as_string=True))
@@ -130,31 +150,33 @@ class GstoreFile(AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands):
             app("")
             app(self.hdr.to_string(verbose=verbose, title="Abinit Header"))
 
+        app(marquee("Gstore parameters", mark="="))
         app(f"nsppol: {self.r.nsppol}")
         app(f"gstore_completed: {bool(self.r.completed)}")
-        app(f"gstore_cplex: {self.r.cplex}")
-        app(f"gstore_kzone: {self.r.kzone}")
-        app(f"gstore_kfilter: {self.r.kfilter}")
-        app(f"gstore_gmode: {self.r.gmode}")
-        app(f"gstore_qzone: {self.r.qzone}")
-        app(f"gstore_with_vk: {self.r.with_vk}")
-        app(f"gstore_kptopt: {self.r.kptopt}")
-        app(f"gstore_qptopt: {self.r.qptopt}")
+        app(f"kzone: {self.r.kzone}")
+        app(f"kfilter: {self.r.kfilter}")
+        app(f"gtype: {self.r.gtype}")
+        app(f"qzone: {self.r.qzone}")
+        app(f"with_vk: {self.r.with_vk}")
+        app(f"kptopt: {self.r.kptopt}")
+        app(f"qptopt: {self.r.qptopt}")
+        app(f"use_lgk: {self.r.use_lgk}")
+        app(f"use_lgq: {self.r.use_lgq}")
+
         for spin in range(self.r.nsppol):
-            app(f"gstore_brange_spin[{spin}]: {self.r.brange_spin[spin]}")
-            app(f"gstore_erange_spin[{spin}]: {self.r.erange_spin[spin]}")
-            app(f"gstore_glob_spin_nq[{spin}]: {self.r.glob_spin_nq[spin]}")
+            app(f"brange_k_spin[{spin}]: {self.r.brange_k_spin[spin]}")
+            app(f"brange_kq_spin[{spin}]: {self.r.brange_kq_spin[spin]}")
+            app(f"erange_spin[{spin}]: {self.r.erange_spin[spin]}")
+            app(f"glob_spin_nq[{spin}]: {self.r.glob_spin_nq[spin]}")
 
         return "\n".join(lines)
 
     def check_unfilled_entries_in_gvals(self):
-        """
-        """
+        """ """
         r = self.r
-        cplex = r.cplex
         for spin in range(self.nsppol):
             # nctkarr_t("gvals", "dp", "gstore_cplex, nb_kq, nb_k, natom3, glob_nk, glob_nq)
-            variable = r.read_variable("gvals", path=f"gqk_spin{spin+1}")
+            variable = r.read_variable("gvals", path=f"gqk_spin{spin + 1}")
             fill_value = variable._FillValue
             # Read the data
             data = variable[:]
@@ -165,6 +187,434 @@ class GstoreFile(AbinitNcFile, Has_Header, Has_Structure, Has_ElectronBands):
             if self.r.kfilter == "none":
                 raise ValueError("when kfilter == 'none' all the entries in gvals should have been written!")
 
+    @lru_cache
+    def get_gwpt_label_data(self, what: str, spin: int) -> tuple[str, np.array]:
+        """Return label and numpy array to analyze according to `what`."""
+        gqk = self.gqk_spin[spin]
+        # TODO: Handle 1/0 and little group with huge values
+
+        where = (np.abs(gqk.gvals_ks) > 1e-10) & (np.abs(gqk.gvals_ks) < 1e10)
+
+        if what == "ratio":
+            label = r"Ratio $|g^{\text{GWPT}}|/|g^{\text{KS}}|$"
+            # data = np.abs(gqk.gvals) / np.abs(gqk.gvals_ks)
+
+            data = np.ones_like(gqk.gvals, dtype=float)
+            np.divide(
+                np.abs(gqk.gvals),
+                np.abs(gqk.gvals_ks),
+                out=data,
+                where=where,
+            )
+
+        elif what == "gwpt":
+            label = r"$|g|^{\text{GWPT}}$"
+            data = np.abs(gqk.gvals)
+
+        elif what == "gks":
+            label = r"$|g|^\text{KS}}$"
+            data = np.abs(gqk.gvals_ks)
+
+        else:
+            raise ValueError(f"Invalid value for {what=}")
+
+        return label, data
+
+    @add_fig_kwargs
+    def plot_gwpt_hist(
+        self,
+        what: str = "ratio",
+        spin: int = 0,
+        ax=None,
+        hist_kwargs: dict | None = None,
+        ratio_min: float = 0.0,
+        ratio_max: float = 3.0,
+        **kwargs,
+    ) -> Figure:
+        """
+        Plot histograms of the GWPT and KS e-ph matrix elements and of their ratio.
+
+        Args:
+            what:
+            spin: spin index
+            ax: |matplotlib-Axes| or None if a new figure should be created.
+            hist_kwargs:
+            ratio_min: lower bound used to clip the ratio |g^GWPT|/|g^KS|
+                before histogramming. Defaults to 0.0.
+            ratio_max: upper bound used to clip the ratio |g^GWPT|/|g^KS|
+                before histogramming. Defaults to 3.0. Values outside
+                [ratio_min, ratio_max] are dropped (they are usually numerical
+                artifacts from |g^KS| being close to zero).
+            fontsize: legend and label fontsize.
+        """
+        if not self.has_gwpt:
+            raise ValueError("GSTORE does not contain GWPT matrix elements.")
+
+        if ratio_min >= ratio_max:
+            raise ValueError(f"ratio_min ({ratio_min}) must be < ratio_max ({ratio_max}).")
+
+        what_list = ("gwpt", "gks", "ratio")
+        xlabels = {
+            "gwpt": r"$|g^{GW}|$",
+            "gks": r"$|g^{KS}|$",
+            "ratio": r"Ratio $|g^{GW}|/|g^{KS}|$",
+        }
+
+        ax_list = None
+        ax_list, fig, plt = get_axarray_fig_plt(
+            ax_list, nrows=len(what_list), ncols=1, sharex=False, sharey=True, squeeze=True
+        )
+
+        for what, ax in zip(what_list, ax_list, strict=False):
+            _, data = self.get_gwpt_label_data(what, spin)
+            data_flat = data.flatten()
+
+            if what == "ratio":
+                # Drop non-finite values and values outside [ratio_min, ratio_max].
+                # The ratio can blow up when |g^KS| is close to zero, which would
+                # otherwise stretch the histogram x-axis and hide the bulk of the
+                # distribution (typically centered near 1).
+                finite = np.isfinite(data_flat)
+                in_range = (data_flat >= ratio_min) & (data_flat <= ratio_max)
+                data_flat = data_flat[finite & in_range]
+
+            hist_kwargs_ = hist_kwargs or {}
+            ax.hist(data_flat, **hist_kwargs_)
+            ax.set_xlabel(xlabels[what])
+            ax.set_ylabel("Count")
+
+            if what == "ratio":
+                ax.set_xlim(ratio_min, ratio_max)
+            else:
+                # |g| is non-negative; anchor the left edge at 0 so the three
+                # subplots align visually at x=0 (matplotlib's auto-scale
+                # otherwise pads the left side with a small negative margin).
+                ax.set_xlim(left=0)
+
+        # Add vertical spacing so the xlabel of each subplot is not hidden
+        # behind the next subplot's frame.
+        fig.subplots_adjust(hspace=0.45)
+
+        return fig
+
+    @add_fig_kwargs
+    def plot_gwpt_heatmap_kq(self, kpoint, qpoint, what: str = "ratio", spin: int = 0, ax=None, **kwargs) -> Figure:
+        """
+        Plot heatmap with the ratio between the GWPT and the KS e-ph matrix elements.
+
+        Args:
+            kpoint:
+            qpoint:
+            what:
+            spin: spin index
+            ax: |matplotlib-Axes| or None if a new figure should be created.
+            hist_kwargs:
+            fontsize: legend and label fontsize.
+        """
+        if not self.has_gwpt:
+            raise ValueError("GSTORE does not contain GWPT matrix elements.")
+
+        ik_glob, kpoint = self.r.find_ik_glob_kpoint(kpoint, spin)
+        iq_glob, qpoint = self.r.find_iq_glob_qpoint(qpoint, spin)
+
+        label, data = self.get_gwpt_label_data(what, spin)
+
+        natom = len(self.structure)
+        ax_mat, fig, plt = get_axarray_fig_plt(None, nrows=natom, ncols=3, sharex=True, sharey=True, squeeze=False)
+
+        for iat, idir in itertools.product(range(natom), range(3)):
+            # (glob_nq, glob_nk, natom3, nb_kq, nb_k)
+            ipc = idir + iat * 3
+            grid_mn = data[iq_glob, ik_glob, ipc]
+
+            ax = ax_mat[iat, idir]
+            ax.imshow(grid_mn, aspect="auto", origin="lower")
+            # ax.set_colorbar(label=label)
+            ax.set_xlabel("m band index")
+            ax.set_ylabel("n band index")
+            # ax.set_title("A/B averaged over bands")
+
+        return fig
+
+    @add_fig_kwargs
+    def plot_gwpt_vs_qpts(
+        self,
+        kpoint,
+        band_k: int,
+        frac_bounds,
+        band_kq_range: range | list,
+        spin: int = 0,
+        dist_tol: float = 1e-12,
+        fontsize: int = 8,
+        **kwargs,
+    ) -> Figure:
+        """ """
+        if not self.has_gwpt:
+            raise ValueError("GSTORE does not contain GWPT matrix elements.")
+
+        gqk = self.gqk_spin[spin]
+        in_k = band_k - gqk.bstart_k
+        ik_glob, kpoint = self.r.find_ik_glob_kpoint(kpoint, spin)
+
+        reciprocal_lattice = self.structure.reciprocal_lattice
+        cart_bounds = reciprocal_lattice.get_cartesian_coords(frac_bounds)
+
+        qpt_cart_coords = []
+        for iq in range(gqk.glob_nq):
+            iq_bz = self.r.qglob2bz[spin, iq]
+            qpt_cart_coords.append(reciprocal_lattice.get_cartesian_coords(self.r.qbz[iq_bz]))
+
+        from abipy.core.kpoints import find_points_along_path
+
+        p = find_points_along_path(cart_bounds, qpt_cart_coords, dist_tol)
+        if not len(p.ikfound):
+            raise ValueError(
+                f"Cannot find q-points with {dist_tol=}. Check input boundaries or try to increase dist_tol."
+            )
+        # p.ikfound, p.dist_list, p.path_ticks)
+
+        natom = len(self.structure)
+        ax_mat, fig, plt = get_axarray_fig_plt(None, nrows=natom, ncols=3, sharex=False, sharey=False, squeeze=False)
+
+        # shape: (glob_nq, natom3, nb_kq)
+        g_qpm = gqk.gvals[:, ik_glob, :, :, in_k]
+        gks_qpm = gqk.gvals_ks[:, ik_glob, :, :, in_k]
+
+        xs = list(range(len(p.ikfound)))
+        for iat, idir in itertools.product(range(natom), range(3)):
+            ax = ax_mat[iat, idir]
+            ipert = iat + idir
+            # (glob_nq, nb_kq) --> (nb_kq, glob_nq).
+            gwpt_bq, ks_bq = g_qpm[:, ipert, :].T.copy(), gks_qpm[:, ipert, :].T.copy()
+
+            gwpt_style = dict(marker="o", color="red")
+            ks_style = dict(marker=".", color="blue")
+            ratio_style = dict(ls="--", color="k")
+            # band_kq_range = [0, 4]
+
+            for ib_kq in range(gqk.nb_kq):
+                if band_kq_range is not None and ib_kq not in band_kq_range:
+                    continue
+                gwpt_ys = np.abs(gwpt_bq[ib_kq, p.ikfound])
+                ks_ys = np.abs(ks_bq[ib_kq, p.ikfound])
+                ax.plot(xs, gwpt_ys, **gwpt_style)
+                ax.plot(xs, ks_ys, **ks_style)
+
+                # Plot enhancement ratio.
+                ratio_ax = ax.twinx()
+                ratio = gwpt_ys / ks_ys
+                ratio_ax.plot(xs, ratio, **ratio_style)
+
+            # set_grid_legend(ax, fontsize, xlabel=r"band index (kq)")
+
+        return fig
+
+    @add_fig_kwargs
+    def plot_gwpt_vs_ks(
+        self, kpoint, band_k: int, spin: int = 0, fontsize: int = 8, colormap: str = "jet", **kwargs
+    ) -> Figure:
+        """ """
+        if not self.has_gwpt:
+            raise ValueError("GSTORE does not contain GWPT matrix elements.")
+
+        natom = len(self.structure)
+        ax_mat, fig, plt = get_axarray_fig_plt(None, nrows=natom, ncols=3, sharex=False, sharey=False, squeeze=False)
+
+        gqk = self.gqk_spin[spin]
+        in_k = band_k - gqk.bstart_k
+        ik_glob, kpoint = self.r.find_ik_glob_kpoint(kpoint, spin)
+
+        # shape: (glob_nq, natom3, nb_kq)
+        g_qpm = gqk.gvals[:, ik_glob, :, :, in_k]
+        gks_qpm = gqk.gvals_ks[:, ik_glob, :, :, in_k]
+
+        cmap = plt.get_cmap(colormap)
+        colors = [cmap(iq / gqk.glob_nq) for iq in range(gqk.glob_nq)]
+        xs = list(range(gqk.nb_kq))
+
+        for iat, idir in itertools.product(range(natom), range(3)):
+            ax = ax_mat[iat, idir]
+            ipert = iat + idir
+            # (glob_nq, nb_kq)
+            gwpt_ys, ks_ys = g_qpm[:, ipert, :], gks_qpm[:, ipert, :]
+
+            for iq in range(gqk.glob_nq):
+                numerator = np.abs(gwpt_ys[iq])
+                denominator = np.abs(ks_ys[iq])
+                # ratio = numerator / denominator
+                # ratio = np.divide(numerator, denominator, out=np.zeros_like(numerator), where=np.abs(denominator) > 1e-2)
+                # ax.plot(xs, ratio, color=colors[iq])
+                ax.plot(xs, np.abs(gwpt_ys[iq]), color=colors[iq], ls="-")
+                ax.plot(xs, np.abs(ks_ys[iq]), color=colors[iq], ls="--")
+
+            set_grid_legend(ax, fontsize, xlabel=r"band index (kq)")
+
+        return fig
+
+    @add_fig_kwargs
+    def plot_gwpt_vs_ks_scatter(
+        self,
+        spin: int = 0,
+        ratio_min: float | None = None,
+        ratio_max: float | None = None,
+        ks_tol: float = 1e-7,
+        fit_intercept: bool = False,
+        colormap: str = "viridis",
+        zoom_factor: float = 2.0,
+        with_inset: bool = True,
+        inset_loc: str = "lower right",
+        scatter_kwargs: dict | None = None,
+        ax=None,
+        fontsize: int = 8,
+        **kwargs,
+    ) -> Figure:
+        """
+        Scatter plot of |g^GW| vs |g^KS| over all matrix elements for a given spin.
+
+        Each point is one (q, k, band_kq, perturbation, band_k) tuple. Points are
+        colored by the ratio |g^GW|/|g^KS|, and a linear least-squares fit is
+        overlaid. An optional inset shows the full data range so outliers are
+        visible without disturbing the zoomed main axes.
+
+        Args:
+            spin: spin index.
+            ratio_min: optional lower bound of the ratio window. Points with
+                ratio < ratio_min are dropped. If None (default), no lower
+                bound is applied.
+            ratio_max: optional upper bound of the ratio window. Points with
+                ratio > ratio_max are dropped. If None (default), no upper
+                bound is applied.
+            ks_tol: |g^KS| values <= ks_tol are discarded to avoid huge
+                ratios from a near-zero denominator. Default 1e-7.
+            fit_intercept: if True, fit y = a*x + b; otherwise fit y = a*x
+                (forced through the origin).
+            colormap: matplotlib colormap used to color points by ratio.
+                When ratio_min/ratio_max are None the colormap is clipped to
+                the 1st/99th percentile of the ratio distribution so a few
+                outliers don't wash out the rest of the colors.
+            zoom_factor: the main axes go from 0 to
+                zoom_factor * max(median(|g^KS|), median(|g^GW|)) on both axes.
+            with_inset: if True, add an inset showing the full data range
+                with a rectangle indicating the zoom window.
+            inset_loc: matplotlib location string for the inset.
+            scatter_kwargs: extra kwargs forwarded to ``ax.scatter``
+                (e.g. ``{"s": 6, "alpha": 0.6}``).
+            ax: |matplotlib-Axes| or None if a new figure should be created.
+            fontsize: legend fontsize.
+        """
+        if not self.has_gwpt:
+            raise ValueError("GSTORE does not contain GWPT matrix elements.")
+        if (ratio_min is not None and ratio_max is not None
+                and ratio_min >= ratio_max):
+            raise ValueError(f"ratio_min ({ratio_min}) must be < ratio_max ({ratio_max}).")
+
+        gqk = self.gqk_spin[spin]
+        g_gw = np.abs(np.asarray(gqk.gvals)).ravel()
+        g_ks = np.abs(np.asarray(gqk.gvals_ks)).ravel()
+
+        # Keep finite values with |g^KS| above the safety threshold.
+        # ks_tol protects against numerically pathological ratios where the
+        # denominator is essentially zero; it is *not* a user-facing
+        # visualization filter (use ratio_min/ratio_max for that).
+        valid = np.isfinite(g_gw) & np.isfinite(g_ks) & (g_ks > ks_tol)
+        x = g_ks[valid]
+        y = g_gw[valid]
+        ratio = y / x
+
+        # Optional ratio window. Sides default to ±inf (no filtering).
+        lo = -np.inf if ratio_min is None else ratio_min
+        hi = +np.inf if ratio_max is None else ratio_max
+        if not (np.isneginf(lo) and np.isposinf(hi)):
+            window = (ratio >= lo) & (ratio <= hi)
+            x, y, ratio = x[window], y[window], ratio[window]
+
+        if x.size < 2:
+            raise RuntimeError(
+                f"Only {x.size} point(s) remain after filtering; cannot fit."
+            )
+
+        # Linear fit.
+        if fit_intercept:
+            slope, intercept = np.polyfit(x, y, 1)
+            fit_label = f"fit: y = {slope:.4g} x + {intercept:.4g}"
+        else:
+            # Closed-form least squares for y = a*x: a = (x.y) / (x.x).
+            slope = float(np.dot(x, y) / np.dot(x, x))
+            intercept = 0.0
+            fit_label = f"fit: y = {slope:.4g} x"
+
+        ax, fig, _ = get_ax_fig_plt(ax=ax)
+
+        scatter_kwargs_ = {"s": 6, "alpha": 0.6, "edgecolors": "none"}
+        if scatter_kwargs:
+            scatter_kwargs_.update(scatter_kwargs)
+
+        # Colormap range: user-supplied bounds win; otherwise clip to the
+        # 1st/99th percentile so a handful of outliers don't wash out the
+        # rest of the color resolution.
+        if ratio_min is not None:
+            cmap_vmin = ratio_min
+        else:
+            cmap_vmin = float(np.percentile(ratio, 1))
+        if ratio_max is not None:
+            cmap_vmax = ratio_max
+        else:
+            cmap_vmax = float(np.percentile(ratio, 99))
+
+        sc = ax.scatter(
+            x, y, c=ratio, cmap=colormap, vmin=cmap_vmin, vmax=cmap_vmax,
+            **scatter_kwargs_,
+        )
+        cbar = fig.colorbar(sc, ax=ax)
+        cbar.set_label(r"$|g^{GW}|/|g^{KS}|$")
+
+        # Zoomed main axes derived from medians (robust to outliers).
+        med_x = float(np.median(x))
+        med_y = float(np.median(y))
+        main_max = zoom_factor * max(med_x, med_y)
+
+        x_line = np.linspace(0.0, main_max, 200)
+        ax.plot(x_line, slope * x_line + intercept,
+                color="red", linewidth=2.0, label=fit_label)
+
+        ax.set_xlabel(r"$|g^{KS}|$")
+        ax.set_ylabel(r"$|g^{GW}|$")
+        ax.set_xlim(0.0, main_max)
+        ax.set_ylim(0.0, main_max)
+        ax.set_aspect("equal", adjustable="box")
+        ax.legend(loc="upper left", fontsize=fontsize)
+
+        if with_inset:
+            from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+            from matplotlib.patches import Rectangle
+
+            full_max = max(float(x.max()), float(y.max())) * 1.02
+
+            axins = inset_axes(
+                ax, width="40%", height="40%", loc=inset_loc, borderpad=1.5,
+            )
+            axins.scatter(
+                x, y, c=ratio, cmap=colormap,
+                vmin=cmap_vmin, vmax=cmap_vmax, **scatter_kwargs_,
+            )
+            x_line_f = np.linspace(0.0, full_max, 200)
+            axins.plot(x_line_f, slope * x_line_f + intercept,
+                       color="red", linewidth=1.5)
+            axins.set_xlim(0.0, full_max)
+            axins.set_ylim(0.0, full_max)
+            axins.set_aspect("equal", adjustable="box")
+            axins.set_title("full range", fontsize=fontsize + 1)
+            axins.tick_params(axis="both", labelsize=fontsize)
+
+            # Rectangle on the inset outlining the zoom window of the main axes.
+            if full_max > main_max:
+                axins.add_patch(Rectangle(
+                    (0.0, 0.0), main_max, main_max,
+                    fill=False, edgecolor="gray", linewidth=0.8,
+                ))
+
+        return fig
+
 
 @dataclasses.dataclass(kw_only=True)
 class Gqk:
@@ -172,23 +622,33 @@ class Gqk:
     This object stores the e-ph matrix elements (g or g^2) and the matrix elements
     of the velocity operator for a given spin.
     """
-    cplex: int         # 1 if |g|^2 is stored
-                       # 2 if complex valued g (mind the gauge)
-    spin: int          # Spin index.
-    nb: int            # Number of bands
-    bstart: int
-    #bstop: int
 
-    glob_nk: int       # Total number of k/q points in global matrix.
-    glob_nq: int       # Note that k-points/q-points can be filtered.
-                       # Use kzone, qzone and kfilter to interpret these dimensions.
+    spin: int  # Spin index.
+    nb_k: int  # Number of bands at k.
+    nb_kq: int  # Number of bands at k+q.
+    bstart_k: int  # Initial band at k.
+    bstart_kq: int  # Initial band at k+q.
+    glob_nk: int  # Total number of k/q points in global matrix.
+    glob_nq: int  # Note that k-points/q-points can be filtered.
 
     gstore: GstoreFile
 
-    gvals: np.ndarray | None
-    g2: np.ndarray | None
+    gvals: np.ndarray  # Array of shape (glob_nq, glob_nk, natom3, nb_kq, nb_k)
+    # storing complex g(k,q) in the atom representation.
+
+    gvals_ks: np.ndarray | None  # Same as gvals but for KS if we are in GWPT mode.
+
     vk_cart_ibz: np.ndarray | None
     vkmat_cart_ibz: np.ndarray | None
+
+    def __post_init__(self):
+        """Implement consistency check"""
+        natom3 = len(self.structure) * 3
+        expected_shape = (self.glob_nq, self.glob_nk, natom3, self.nb_kq, self.nb_k)
+        if self.gvals.shape != expected_shape:
+            raise ValueError(f"{self.gvals.shape=} != {expected_shape=}")
+        if self.gvals_ks is not None and self.gvals_ks.shape != expected_shape:
+            raise ValueError(f"{self.gvals_ks.shape=} != {expected_shape=}")
 
     @classmethod
     def from_gstore(cls, gstore: GstoreFile, spin: int) -> Gqk:
@@ -196,38 +656,41 @@ class Gqk:
         Build an instance from a GstoreFile and the spin index.
         """
         ncr = gstore.r
-        path = f"gqk_spin{spin+1}"
-        cplex = ncr.read_dimvalue("gstore_cplex")
-        nb = ncr.read_dimvalue("nb", path=path)
+        path = f"gqk_spin{spin + 1}"
+        nb_k = ncr.read_dimvalue("nb_k", path=path)
+        nb_kq = ncr.read_dimvalue("nb_kq", path=path)
         glob_nk = ncr.read_dimvalue("glob_nk", path=path)
         glob_nq = ncr.read_dimvalue("glob_nq", path=path)
 
         # Read e-ph matrix elements
         # nctkarr_t("gvals", "dp", "gstore_cplex, nb_kq, nb_k, natom3, glob_nk, glob_nq)
         # Have to transpose the (nb_kq, nb_k) submatrix written by Fortran.
-        g2, gvals = None, None
-        if cplex == 1:
-            g2 = ncr.read_value("gvals", path=path).transpose(0, 1, 2, 4, 3, 5).copy()
+        # Remember that gvals on disk are always complex, in Hartree units and in the atomic representation.
 
-        elif cplex == 2:
-            gvals = ncr.read_value("gvals", path=path).transpose(0, 1, 2, 4, 3, 5).copy()
-            gvals = gvals[...,0] + 1j*gvals[...,1]
+        gvals = ncr.read_value("gvals", path=path).transpose(0, 1, 2, 4, 3, 5).copy()
+        gvals = gvals[..., 0] + 1j * gvals[..., 1]
+
+        # Try to read KS gvals (produced by GWPT code)
+        gvals_ks = None
+        if gstore.has_gwpt:
+            gvals_ks = ncr.read_value("gvals_ks", path=path).transpose(0, 1, 2, 4, 3, 5).copy()
+            gvals_ks = gvals_ks[..., 0] + 1j * gvals_ks[..., 1]
 
         vk_cart_ibz, vkmat_cart_ibz = None, None
         if ncr.with_vk == 1:
-            # nctk_def_arrays(spin_ncid, nctkarr_t("vk_cart_ibz", "dp", "three, nb, gstore_nkibz"))
+            # nctk_def_arrays(spin_ncid, nctkarr_t("vk_cart_ibz", "dp", "three, nb_k, gstore_nkibz"))
             vk_cart_ibz = ncr.read_value("vk_cart_ibz", path=path)
 
         if ncr.with_vk == 2:
-            # Full (nb x nb) matrix.
+            # Full (nb_k x nb_k) matrix.
             # Have to transpose (nb_kq, nb_k) submatrix written by Fortran.
-            # nctk_def_arrays(spin_ncid, nctkarr_t("vkmat_cart_ibz", "dp", "two, three, nb, nb, gstore_nkibz"))
+            # nctk_def_arrays(spin_ncid, nctkarr_t("vkmat_cart_ibz", "dp", "two, three, nb_k, nb_k, gstore_nkibz"))
             vkmat_cart_ibz = ncr.read_value("vkmat_cart_ibz", path=path).transpose(0, 1, 3, 2, 4).copy()
-            vkmat_cart_ibz = vkmat_cart_ibz[...,0] + 1j*vkmat_cart_ibz[...,1]
+            vkmat_cart_ibz = vkmat_cart_ibz[..., 0] + 1j * vkmat_cart_ibz[..., 1]
 
         # Note conversion between Fortran and python indexing.
-        bstart = ncr.read_value("bstart", path=path) - 1
-        #bstop = ncr.read_value("stop", path=path)
+        bstart_k = ncr.read_value("bstart_k", path=path) - 1
+        bstart_kq = ncr.read_value("bstart_kq", path=path) - 1
 
         data = locals()
         return cls(**{k: data[k] for k in [field.name for field in dataclasses.fields(Gqk)]})
@@ -237,12 +700,14 @@ class Gqk:
 
     def to_string(self, verbose: int = 0) -> str:
         """String representation with verbosiy level ``verbose``."""
-        lines = []; app = lines.append
+        lines = []
+        app = lines.append
 
         app(marquee(f"Gqk for spin: {self.spin}", mark="="))
-        app(f"cplex: {self.cplex}")
-        app(f"nb: {self.nb}")
-        app(f"bstart: {self.bstart}")
+        app(f"bstart_k: {self.bstart_k}")
+        app(f"nb_k: {self.nb_k}")
+        app(f"bstart_kq: {self.bstart_kq}")
+        app(f"nb_kq: {self.nb_kq}")
         app(f"glob_nk: {self.glob_nk}")
         app(f"glob_nq: {self.glob_nq}")
 
@@ -250,7 +715,31 @@ class Gqk:
 
     @property
     def structure(self) -> Structure:
+        """|Structure| object."""
         return self.gstore.structure
+
+    @cached_property
+    def g2(self) -> np.ndarray:
+        """g2 in the atomic representation in Ha^2."""
+        return np.abs(self.gvals) ** 2
+
+    # @cached_property
+    # def g_nu(self) -> np.ndarray:
+    #   """g in the phonon representation in Ha."""
+    #   self.gvals
+
+    @cached_property
+    def g2_ks(self) -> np.ndarray | None:
+        """KS g2 in the atomic representation in Ha^2."""
+        if self.gvals_ks is None:
+            return None
+        return np.abs(self.gvals_ks) ** 2
+
+    # @cached_property
+    # def g_ks_nu(self) -> np.ndarray:
+    #   """g in the phonon representation in Ha."""
+    #   if self.gvals_ks is None:
+    #       return None
 
     def get_dataframe(self, what: str = "g2") -> pd.DataFrame:
         """
@@ -258,21 +747,21 @@ class Gqk:
         all |v_nk|^2 if what == "v2".
         """
         if what == "g2":
-            g2 = self.g2 if self.g2 is not None else np.abs(self.gvals) ** 2
-            df = nparr_to_df("g2", g2, ["iq", "ik", "imode", "m_kq", "n_k"])
+            df = nparr_to_df("g2", self.g2, ["iq", "ik", "imode", "m_kq", "n_k"])
 
         elif what == "v2":
             if self.vk_cart_ibz is None:
                 raise ValueError("vk_cart_ibz is not available in GSTORE!")
             # Compute the squared norm of each vector
-            v2 = np.sum(self.vk_cart_ibz ** 2, axis=2)
+            v2 = np.sum(self.vk_cart_ibz**2, axis=2)
             df = nparr_to_df("v2", v2, ["ik", "n_k"])
 
         else:
             raise ValueError(f"Invalid {what=}")
 
-        #df["m_kq"] += bstart_mkq
-        #df["n_k"] += bstart_nk
+        # Shift band indices.
+        df["m_kq"] += self.bstart_kq
+        df["n_k"] += self.bstart_k
 
         return df
 
@@ -281,7 +770,7 @@ class Gqk:
         Build and return an interpolator that can be used to interpolate g^2(q)
 
         NB: Invoking the interpolation with an arbitrary q-point returns a numpy array
-        of shape (nb, nb, natom3) with g_{m_kq n_k, \nu}(q)
+        of shape (nb_kq, nb_k, natom3) with g_{m_kq n_k, \nu}(q)
         """
         r = self.gstore.r
 
@@ -293,17 +782,18 @@ class Gqk:
         q_indices = kpoints_indices(r.qbz, ngqpt, shifts, check_mesh=check_mesh)
 
         natom3 = 3 * len(self.structure)
-        nb = self.nb
+        nb_k = self.nb_k
+        nb_kq = self.nb_kq
         nx, ny, nz = ngqpt
+        assert nb_k == nb_kq
 
         # (glob_nq, glob_nk, natom3, m_kq, n_k)
-        g2 = self.g2 if self.g2 is not None else np.abs(self.gvals) ** 2
-        g2_qph_mn = g2[:,ik_g]
+        g2_qph_mn = self.g2[:, ik_g]
 
         # Insert g2 in g2_grid
-        g2_grid = np.empty((nb, nb, natom3, nx, ny, nz))
+        g2_grid = np.empty((nb_k, nb_kq, natom3, nx, ny, nz))
         for nu in range(natom3):
-            for g2_mn, q_inds in zip(g2_qph_mn[:,nu], q_indices):
+            for g2_mn, q_inds in zip(g2_qph_mn[:, nu], q_indices, strict=False):
                 ix, iy, iz = q_inds
                 g2_grid[:, :, nu, ix, iy, iz] = g2_mn
 
@@ -319,12 +809,10 @@ class Gqk:
         # Find the internal indices of (qpoint, kpoint)
         iq_g, qpoint = self.gstore.r.find_iq_glob_qpoint(qpoint, self.spin)
         ik_g, kpoint = self.gstore.r.find_ik_glob_kpoint(kpoint, self.spin)
+
         if what == "g2":
-            g2 = self.g2 if self.g2 is not None else np.abs(self.gvals) ** 2
-            return g2[iq_g, ik_g]
+            return self.g2[iq_g, ik_g]
         if what == "g":
-            if self.cplex != 2:
-                raise ValueError("Gstore file stores g2 instead of complex g")
             return self.gvals[iq_g, ik_g]
 
         raise ValueError(f"Invalid {what=}")
@@ -338,8 +826,10 @@ class Gqk:
         """
         g2_slice = self.get_g_qpt_kpt(qpoint, kpoint, what)
         df = nparr_to_df(what, g2_slice, ["imode", "m_kq", "n_k"])
-        #df["m_kq"] += bstart_mkq
-        #df["n_k"] += bstart_nk
+
+        # Shift band indices.
+        df["m_kq"] += self.bstart_kq
+        df["n_k"] += self.bstart_k
 
         return df
 
@@ -349,7 +839,7 @@ class Gqk:
         """
         # This dimensions must agree in order to have a meaningful comparison.
         # so raise immediately if not equal.
-        aname_list = ["cplex", "spin", "nb", "glob_nk", "glob_nq"]
+        aname_list = ["spin", "nb_k", "nb_kq", "glob_nk", "glob_nq"]
 
         for aname in aname_list:
             val1, val2 = getattr(self, aname), getattr(other, aname)
@@ -365,26 +855,29 @@ class Gqk:
                 raise RuntimeError(f"Different values of {aname=}, {val1=}, {val2=}")
 
         ierr = 0
-        kws = dict(verbose=verbose) # , atol= rtol)
+        kws = dict(verbose=verbose)  # , atol= rtol)
 
         # Compare v_nk or v_mn_k.
         if self.vk_cart_ibz is not None:
-            if not _allclose("vk_cart_ibz", self.vk_cart_ibz, other.vk_cart_ibz, **kws): ierr += 1
+            if not _allclose("vk_cart_ibz", self.vk_cart_ibz, other.vk_cart_ibz, **kws):
+                ierr += 1
 
         if self.vkmat_cart_ibz is not None:
-            if not _allclose("vkmat_cart_ibz", self.vkmat_cart_ibz, other.vkmat_cart_ibz, **kws): ierr += 1
+            if not _allclose("vkmat_cart_ibz", self.vkmat_cart_ibz, other.vkmat_cart_ibz, **kws):
+                ierr += 1
 
         # Compare g or g^2.
-        if self.g2 is not None:
-            if not _allclose("g2", self.g2, other.g2, **kws): ierr += 1
+        if not _allclose("g2", self.g2, other.g2, **kws):
+            ierr += 1
 
         if self.gvals is not None:
-            if not _allclose("gvals", self.gvals, other.gvals, **kws): ierr += 1
+            if not _allclose("gvals", self.gvals, other.gvals, **kws):
+                ierr += 1
 
         return ierr
 
-    #@add_fig_kwargs
-    #def plot_g2_hist(self, ax_list=None, **kwargs) -> Figure:
+    # @add_fig_kwargs
+    # def plot_g2_hist(self, ax_list=None, **kwargs) -> Figure:
 
     #    natom = len(self.structure)
     #    nrows, ncols, gridspec_kw = natom, 3, None
@@ -393,10 +886,8 @@ class Gqk:
     #    ax_list = ax_list.ravel()
 
     #    # (glob_nq, glob_nk, natom3, m_kq, n_k)
-    #    g2 = self.g2 if self.g2 is not None else np.abs(self.gvals) ** 2
-
     #    for imode, ax in zip(range(natom * 3), ax_list):
-    #        data = g2[:,:,imode,:,:].flatten()
+    #        data = self.g2[:,:,imode,:,:].flatten()
     #        ax.hist(data)
 
     #    return fig
@@ -409,12 +900,16 @@ class GstoreReader(BaseEphReader):
     .. rubric:: Inheritance Diagram
     .. inheritance-diagram:: GstoreReader
     """
+
     def __init__(self, filepath: PathLike):
+        """
+        Args:
+            filepath: Path to the netcdf file.
+        """
         super().__init__(filepath)
 
         # Read important dimensions.
         self.nsppol = self.read_dimvalue("number_of_spins")
-        self.cplex = self.read_dimvalue("gstore_cplex")
         self.nkbz = self.read_dimvalue("gstore_nkbz")
         self.nkibz = self.read_dimvalue("gstore_nkibz")
         self.nqbz = self.read_dimvalue("gstore_nqbz")
@@ -429,11 +924,14 @@ class GstoreReader(BaseEphReader):
         self.kzone = self.read_string("gstore_kzone")
         self.qzone = self.read_string("gstore_qzone")
         self.kfilter = self.read_string("gstore_kfilter")
-        self.gmode = self.read_string("gstore_gmode")
+        self.gtype = self.read_string("gstore_gtype")
 
         # Note conversion Fortran --> C for the isym index.
-        self.brange_spin = self.read_value("gstore_brange_spin")
-        self.brange_spin[:,0] -= 1
+        self.brange_k_spin = self.read_value("gstore_brange_k_spin")
+        self.brange_k_spin[:, 0] -= 1
+        self.brange_kq_spin = self.read_value("gstore_brange_kq_spin")
+        self.brange_kq_spin[:, 0] -= 1
+
         self.erange_spin = self.read_value("gstore_erange_spin")
         # Total number of k/q points for each spin after filtering (if any)
         self.glob_spin_nq = self.read_value("gstore_glob_nq_spin")
@@ -452,10 +950,10 @@ class GstoreReader(BaseEphReader):
         # nctkarr_t("gstore_kbz2ibz", "i", "six, gstore_nkbz"), &
         # nctkarr_t("gstore_qbz2ibz", "i", "six, gstore_nqbz"), &
         self.kbz2ibz = self.read_value("gstore_kbz2ibz")
-        self.kbz2ibz[:,0] -= 1
+        self.kbz2ibz[:, 0] -= 1
 
         self.qbz2ibz = self.read_value("gstore_qbz2ibz")
-        self.qbz2ibz[:,0] -= 1
+        self.qbz2ibz[:, 0] -= 1
 
         # Mapping q/k points in gqk --> BZ. Note conversion Fortran --> C for indexing.
         # nctkarr_t("gstore_qglob2bz", "i", "gstore_max_nq, number_of_spins"), &
@@ -465,31 +963,39 @@ class GstoreReader(BaseEphReader):
         self.kglob2bz = self.read_value("gstore_kglob2bz")
         self.kglob2bz -= 1
 
-    def find_iq_glob_qpoint(self, qpoint, spin: int):
+        self.use_lgk = self.read_value("gstore_use_lgk")
+        self.use_lgq = self.read_value("gstore_use_lgq")
+
+    def find_iq_glob_qpoint(self, qpoint, spin: int) -> tuple:
         """
         Find the internal index of the qpoint needed to access the gvals array.
+        Return index of the q-point and qpoint as array.
         """
         qpoint = np.asarray(qpoint)
         for iq_g, iq_bz in enumerate(self.qglob2bz[spin]):
             if np.allclose(qpoint, self.qbz[iq_bz]):
-                #print(f"Found {qpoint = } with index {iq_g = }")
+                # print(f"Found {qpoint = } with index {iq_g = }")
                 return iq_g, qpoint
 
-        raise ValueError(f"Cannot find {qpoint=} in {self.filepath=}")
+        raise ValueError(f"Cannot find {qpoint=} in {self.path}")
 
-    def find_ik_glob_kpoint(self, kpoint, spin: int):
-        """Find the internal indices of the kpoint needed to access the gvals array."""
+    def find_ik_glob_kpoint(self, kpoint, spin: int) -> tuple:
+        """
+        Find the internal indices of the kpoint needed to access the gvals array.
+        Return index of the k-point and kpoint as array.
+        """
         kpoint = np.asarray(kpoint)
         for ik_g, ik_bz in enumerate(self.kglob2bz[spin]):
             if np.allclose(kpoint, self.kbz[ik_bz]):
-                #print(f"Found {kpoint = } with index {ik_g = }")
+                # print(f"Found {kpoint = } with index {ik_g = }")
                 return ik_g, kpoint
 
-        raise ValueError(f"Cannot find {kpoint=} in {self.filepath=}")
+        raise ValueError(f"Cannot find {kpoint=} in {self.path}")
 
     # TODO: This fix to read groups should be imported in pymatgen.
     @cached_property
     def path2group(self) -> dict:
+        """Dictionary mapping path to group."""
         return self.rootgrp.groups
 
 
@@ -506,11 +1012,11 @@ class GstoreRobot(Robot, RobotWithEbands):
             "t05o_GSTORE.nc",
             ])
 
-        robot.neq(verbose=1)
 
     .. rubric:: Inheritance Diagram
     .. inheritance-diagram:: GstoreRobot
     """
+
     EXT = "GSTORE"
 
     def neq(self, ref_basename: str | None = None, verbose: int = 0) -> int:
@@ -543,10 +1049,23 @@ class GstoreRobot(Robot, RobotWithEbands):
         Helper function to compare two GSTORE files.
         """
         # These quantities must be the same to have a meaningful comparison.
-        aname_list = ["structure", "nsppol", "cplex", "nkbz", "nkibz",
-                      "nqbz", "nqibz", "completed", "kzone", "qzone", "kfilter", "gmode",
-                      "brange_spin", "erange_spin", "glob_spin_nq", "glob_nk_spin",
-                     ]
+        aname_list = [
+            "structure",
+            "nsppol",
+            "nkbz",
+            "nkibz",
+            "nqbz",
+            "nqibz",
+            "completed",
+            "kzone",
+            "qzone",
+            "kfilter",
+            "brange_k_spin",
+            "brange_kq_spin",
+            "erange_spin",
+            "glob_spin_nq",
+            "glob_nk_spin",
+        ]
 
         for aname in aname_list:
             self._compare_attr_name(aname, self, gstore2)
@@ -564,7 +1083,7 @@ class GstoreRobot(Robot, RobotWithEbands):
         This function *generates* a predefined list of matplotlib figures with minimal input from the user.
         Used in abiview.py to get a quick look at the results.
         """
-        #for fig in self.get_ebands_plotter().yield_figs(): yield fig
+        # for fig in self.get_ebands_plotter().yield_figs(): yield fig
 
     def write_notebook(self, nbpath=None) -> str:
         """
@@ -574,14 +1093,16 @@ class GstoreRobot(Robot, RobotWithEbands):
         nbformat, nbv, nb = self.get_nbformat_nbv_nb(title=None)
 
         args = [(l, f.filepath) for l, f in self.items()]
-        nb.cells.extend([
-            #nbv.new_markdown_cell("# This is a markdown cell"),
-            nbv.new_code_cell("robot = abilab.GstoreRobot(*%s)\nrobot.trim_paths()\nrobot" % str(args)),
-            #nbv.new_code_cell("ebands_plotter = robot.get_ebands_plotter()"),
-        ])
+        nb.cells.extend(
+            [
+                # nbv.new_markdown_cell("# This is a markdown cell"),
+                nbv.new_code_cell("robot = abilab.GstoreRobot(*%s)\nrobot.trim_paths()\nrobot" % str(args)),
+                # nbv.new_code_cell("ebands_plotter = robot.get_ebands_plotter()"),
+            ]
+        )
 
         # Mixins
-        #nb.cells.extend(self.get_baserobot_code_cells())
-        #nb.cells.extend(self.get_ebands_code_cells())
+        # nb.cells.extend(self.get_baserobot_code_cells())
+        # nb.cells.extend(self.get_ebands_code_cells())
 
         return self._write_nb_nbpath(nb, nbpath)
